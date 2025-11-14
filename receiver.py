@@ -1,182 +1,78 @@
 import socket
-import subprocess
-import sys
-import os
-import hashlib
-import time
-import base64
-import requests
-import tempfile
-import shutil
-from cryptography.fernet import Fernet
-
-HOST = "0.0.0.0"
-PORT = 5353  # Port mDNS (Multicast DNS) ouvert par défaut sur Windows
-VERSION = "1.0.0"
-GITHUB_REPO = "votre_username/votre_repo"  # À MODIFIER
-MAX_TIME_DIFF = 30  # Accepte les messages de max 30 secondes
+from datetime import datetime
 
 
-def get_secret_key():
-    """Récupère la clé depuis la variable d'environnement de manière discrète"""
-    # Cherche dans plusieurs emplacements possibles
-    key = os.environ.get('REMOTE_KEY') or os.environ.get('RK') or os.environ.get('SYSTEM_REMOTE')
-    if not key:
-        # Tente de lire depuis un fichier caché (optionnel)
-        config_paths = [
-            os.path.join(os.path.expanduser('~'), '.remote_config'),
-            'C:\\Windows\\System32\\config\\remote.key' if sys.platform.startswith('win') else '/etc/.remote_key'
-        ]
-        for path in config_paths:
-            if os.path.exists(path):
-                try:
-                    with open(path, 'r') as f:
-                        key = f.read().strip()
-                        break
-                except:
-                    pass
-
-    if not key:
-        print("ERREUR: Clé de chiffrement non trouvée")
-        print("Configurez REMOTE_KEY dans les variables d'environnement")
-        sys.exit(1)
-
-    key_hash = hashlib.sha256(key.encode()).digest()
-    return Fernet(base64.urlsafe_b64encode(key_hash))
-
-
-def decrypt_message(cipher, encrypted_data):
-    """Déchiffre et valide le message"""
+def start_listening(host, port):
+    """Écoute et affiche les messages reçus"""
     try:
-        decrypted = cipher.decrypt(encrypted_data).decode()
-        timestamp, command = decrypted.split('|', 1)
+        # Créer un socket TCP/IP
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        # Vérifier que le message n'est pas trop vieux (protection contre replay attacks)
-        msg_time = int(timestamp)
-        current_time = int(time.time())
-        if abs(current_time - msg_time) > MAX_TIME_DIFF:
-            return None
+        # Permettre la réutilisation de l'adresse
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        return command
-    except Exception:
-        return None
+        # Lier le socket à l'adresse et au port
+        server_socket.bind((host, port))
 
+        # Écouter les connexions entrantes (max 5 en attente)
+        server_socket.listen(5)
 
-def check_for_updates():
-    """Vérifie si une nouvelle version est disponible sur GitHub"""
-    try:
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            latest = response.json()
-            latest_version = latest['tag_name'].lstrip('v')
-
-            if latest_version > VERSION:
-                print(f"🔄 Nouvelle version disponible: {latest_version} (actuelle: {VERSION})")
-                return latest
-        return None
-    except Exception as e:
-        print(f"⚠ Impossible de vérifier les mises à jour: {e}")
-        return None
-
-
-def download_and_update(release_info):
-    """Télécharge et installe la nouvelle version"""
-    try:
-        # Cherche le fichier .exe dans les assets
-        exe_asset = None
-        for asset in release_info['assets']:
-            if asset['name'].endswith('.exe'):
-                exe_asset = asset
-                break
-
-        if not exe_asset:
-            print("⚠ Aucun fichier .exe trouvé dans la release")
-            return False
-
-        print(f"⬇ Téléchargement de {exe_asset['name']}...")
-        response = requests.get(exe_asset['browser_download_url'], stream=True)
-
-        # Télécharge dans un fichier temporaire
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.exe') as tmp_file:
-            for chunk in response.iter_content(chunk_size=8192):
-                tmp_file.write(chunk)
-            tmp_path = tmp_file.name
-
-        # Remplace l'ancien fichier
-        current_exe = sys.executable if getattr(sys, 'frozen', False) else __file__
-        backup_path = current_exe + '.backup'
-
-        # Sauvegarde l'ancien
-        if os.path.exists(current_exe):
-            shutil.copy2(current_exe, backup_path)
-
-        # Installe le nouveau
-        shutil.move(tmp_path, current_exe)
-        print("✓ Mise à jour installée avec succès!")
-        print("⚠ Redémarrez le programme pour utiliser la nouvelle version")
-        return True
-    except Exception as e:
-        print(f"❌ Erreur lors de la mise à jour: {e}")
-        return False
-
-
-def execute_command(data):
-    """Exécute la commande reçue"""
-    print(f"📥 Commande: {data}")
-
-    if data == "PING":
-        print("   → PONG")
-    elif data == "OPEN_EXPLORER":
-        if sys.platform.startswith("win"):
-            subprocess.Popen(["explorer"])
-        else:
-            subprocess.Popen(["xdg-open", "."])
-        print("   → Explorateur ouvert")
-    elif data == "SHUTDOWN":
-        print("   → Extinction imminente...")
-        if sys.platform.startswith("win"):
-            subprocess.Popen(["shutdown", "/s", "/t", "5"])
-        else:
-            subprocess.Popen(["sudo", "shutdown", "-h", "+1"])
-    elif data == "UPDATE":
-        release = check_for_updates()
-        if release:
-            download_and_update(release)
-    else:
-        print(f"   → Commande inconnue: {data}")
-
-
-def server_loop():
-    cipher = get_secret_key()
-
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.bind((HOST, PORT))
-        print(f"🔐 Receiver v{VERSION} démarré sur port {PORT}")
-        print("⏳ En attente de commandes sécurisées...")
-
-        # Vérifier les mises à jour au démarrage
-        release = check_for_updates()
-        if release:
-            print(f"💡 Pour mettre à jour, envoyez la commande UPDATE")
+        print(f"=== Serveur en écoute sur {host}:{port} ===")
+        print("En attente de signaux...\n")
 
         while True:
-            try:
-                data, addr = s.recvfrom(1024)
-                command = decrypt_message(cipher, data)
+            # Accepter une connexion
+            client_socket, client_address = server_socket.accept()
 
-                if command:
-                    print(f"\n[{addr[0]}] ", end="")
-                    execute_command(command)
-                else:
-                    print(f"⚠ Message invalide ou expiré de {addr[0]}")
+            try:
+                # Recevoir les données
+                data = client_socket.recv(1024).decode('utf-8')
+
+                if data:
+                    # Afficher le message avec horodatage
+                    timestamp = datetime.now().strftime("%H:%M:%S")
+                    print(f"[{timestamp}] Signal reçu de {client_address[0]}:")
+                    print(f"  → {data}")
+                    print()
 
             except Exception as e:
-                print(f"❌ Erreur: {e}")
+                print(f"Erreur lors de la réception: {e}")
+
+            finally:
+                # Fermer la connexion client
+                client_socket.close()
+
+    except KeyboardInterrupt:
+        print("\nArrêt du serveur...")
+    except Exception as e:
+        print(f"Erreur: {e}")
+    finally:
+        server_socket.close()
+
+
+def main():
+    # Configuration
+    HOST = '0.0.0.0'  # Écouter sur toutes les interfaces réseau
+    PORT = 5000  # Port d'écoute (doit correspondre à l'émetteur)
+
+    print("=== Script de réception de signaux ===")
+    print("Appuyez sur Ctrl+C pour arrêter\n")
+
+    # Afficher l'IP locale
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        print(f"Votre IP locale: {local_ip}")
+    except:
+        print("Impossible de déterminer l'IP locale")
+
+    print(f"Port d'écoute: {PORT}\n")
+
+    # Démarrer l'écoute
+    start_listening(HOST, PORT)
 
 
 if __name__ == "__main__":
-    try:
-        server_loop()
-    except KeyboardInterrupt:
-        print("\n👋 Arrêt demandé par l'utilisateur.")
+    main()

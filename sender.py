@@ -1,59 +1,54 @@
 import socket
-import sys
-import os
-import hashlib
 import time
-import base64
-from cryptography.fernet import Fernet
-
-PORT = 5353  # Port mDNS (Multicast DNS) ouvert par défaut sur Windows
-BROADCAST_IP = "255.255.255.255"
 
 
-def get_secret_key():
-    """Récupère la clé depuis la variable d'environnement"""
-    key = os.environ.get('REMOTE_KEY')
-    if not key:
-        print("ERREUR: Variable d'environnement REMOTE_KEY non définie")
-        print("Définissez-la avec: set REMOTE_KEY=votre_cle_secrete (Windows)")
-        print("ou: export REMOTE_KEY=votre_cle_secrete (Linux)")
-        sys.exit(1)
-    # Créer une clé Fernet à partir de la clé secrète
-    key_hash = hashlib.sha256(key.encode()).digest()
-    return Fernet(base64.urlsafe_b64encode(key_hash))
-
-
-def encrypt_message(cipher, command):
-    """Chiffre la commande avec timestamp"""
-    timestamp = str(int(time.time()))
-    message = f"{timestamp}|{command}"
-    return cipher.encrypt(message.encode())
-
-
-def broadcast_command(command):
+def send_signal(host, port, message):
+    """Envoie un message texte à un destinataire"""
     try:
-        cipher = get_secret_key()
-        encrypted = encrypt_message(cipher, command)
+        # Créer un socket TCP/IP
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            s.sendto(encrypted, (BROADCAST_IP, PORT))
-            print(f"✓ Commande '{command}' envoyée de manière sécurisée")
+        # Se connecter au serveur
+        print(f"Connexion à {host}:{port}...")
+        client_socket.connect((host, port))
+        print("Connecté !")
+
+        # Envoyer le message
+        client_socket.send(message.encode('utf-8'))
+        print(f"Message envoyé: {message}")
+
+        # Fermer la connexion
+        client_socket.close()
+
+    except ConnectionRefusedError:
+        print("Erreur: Connexion refusée. Vérifiez que le récepteur est en écoute.")
     except Exception as e:
-        print(f"ERREUR: {e}")
+        print(f"Erreur: {e}")
+
+
+def main():
+    # Configuration
+    HOST = '192.168.1.167'  # Remplacer par l'IP du PC récepteur
+    PORT = 5000  # Port d'écoute (doit correspondre au récepteur)
+
+    print("=== Script d'envoi de signaux ===")
+    print(f"Destination: {HOST}:{PORT}")
+    print("Tapez 'quit' pour quitter\n")
+
+    while True:
+        # Demander le message à envoyer
+        message = input("Message à envoyer: ")
+
+        if message.lower() == 'quit':
+            print("Fermeture...")
+            break
+
+        if message.strip():
+            send_signal(HOST, PORT, message)
+            time.sleep(0.5)  # Petite pause entre les envois
+        else:
+            print("Message vide, non envoyé.")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python sender.py <COMMAND>")
-        print("\nCommandes disponibles:")
-        print("  PING         - Test de connexion")
-        print("  SHUTDOWN     - Éteindre le PC")
-        print("  OPEN_EXPLORER - Ouvrir l'explorateur")
-        print("\nConfiguration requise:")
-        print("  Windows: set REMOTE_KEY=votre_cle_secrete")
-        print("  Linux:   export REMOTE_KEY=votre_cle_secrete")
-        sys.exit(1)
-
-    cmd = sys.argv[1].upper()
-    broadcast_command(cmd)
+    main()
