@@ -1,53 +1,54 @@
-import socket
 import time
+from datetime import datetime
+import os
+
+# Chemin du fichier partagé (à adapter)
+SHARED_FILE = "C:\\Partage\\signaux.txt"  # Ou un chemin réseau comme "\\\\PC2\\Partage\\signaux.txt"
 
 
-def send_signal(host, port, message):
-    """Envoie un message texte à un destinataire"""
+def send_message(message):
+    """Écrit le message dans le fichier partagé"""
     try:
-        # Créer un socket TCP/IP
-        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        full_message = f"[{timestamp}] {message}\n"
 
-        # Se connecter au serveur
-        print(f"Connexion à {host}:{port}...")
-        client_socket.connect((host, port))
-        print("Connecté !")
+        # Écrire dans le fichier (ajout)
+        with open(SHARED_FILE, "a", encoding="utf-8") as f:
+            f.write(full_message)
 
-        # Envoyer le message
-        client_socket.send(message.encode('utf-8'))
-        print(f"Message envoyé: {message}")
+        print(f"✓ Message envoyé: {message}")
+        return True
 
-        # Fermer la connexion
-        client_socket.close()
-
-    except ConnectionRefusedError:
-        print("Erreur: Connexion refusée. Vérifiez que le récepteur est en écoute.")
     except Exception as e:
-        print(f"Erreur: {e}")
+        print(f"✗ Erreur: {e}")
+        print(f"   Vérifiez que le dossier existe et est accessible")
+        return False
 
 
 def main():
-    # Configuration
-    HOST = '192.168.1.167'  # Remplacer par l'IP du PC récepteur
-    PORT = 5000  # Port d'écoute (doit correspondre au récepteur)
-
-    print("=== Script d'envoi de signaux ===")
-    print(f"Destination: {HOST}:{PORT}")
+    print("=== Émetteur de signaux (Fichier partagé) ===")
+    print(f"Fichier: {SHARED_FILE}")
     print("Tapez 'quit' pour quitter\n")
 
+    # Créer le fichier s'il n'existe pas
+    try:
+        if not os.path.exists(SHARED_FILE):
+            os.makedirs(os.path.dirname(SHARED_FILE), exist_ok=True)
+            with open(SHARED_FILE, "w", encoding="utf-8") as f:
+                f.write("=== Début des signaux ===\n\n")
+    except Exception as e:
+        print(f"⚠️  Erreur lors de la création du fichier: {e}\n")
+
     while True:
-        # Demander le message à envoyer
-        message = input("Message à envoyer: ")
+        message = input("Message: ")
 
         if message.lower() == 'quit':
-            print("Fermeture...")
             break
 
         if message.strip():
-            send_signal(HOST, PORT, message)
-            time.sleep(0.5)  # Petite pause entre les envois
-        else:
-            print("Message vide, non envoyé.")
+            send_message(message)
+
+        time.sleep(0.2)
 
 
 if __name__ == "__main__":

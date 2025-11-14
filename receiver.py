@@ -1,78 +1,56 @@
-import socket
-from datetime import datetime
+import time
+import os
+
+# Même chemin que l'émetteur
+SHARED_FILE = "C:\\Partage\\signaux.txt"  # Ou un chemin réseau comme "\\\\PC1\\Partage\\signaux.txt"
 
 
-def start_listening(host, port):
-    """Écoute et affiche les messages reçus"""
-    try:
-        # Créer un socket TCP/IP
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def watch_file():
+    """Surveille le fichier et affiche les nouveaux messages"""
 
-        # Permettre la réutilisation de l'adresse
-        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # Position de lecture
+    last_position = 0
 
-        # Lier le socket à l'adresse et au port
-        server_socket.bind((host, port))
-
-        # Écouter les connexions entrantes (max 5 en attente)
-        server_socket.listen(5)
-
-        print(f"=== Serveur en écoute sur {host}:{port} ===")
-        print("En attente de signaux...\n")
-
-        while True:
-            # Accepter une connexion
-            client_socket, client_address = server_socket.accept()
-
-            try:
-                # Recevoir les données
-                data = client_socket.recv(1024).decode('utf-8')
-
-                if data:
-                    # Afficher le message avec horodatage
-                    timestamp = datetime.now().strftime("%H:%M:%S")
-                    print(f"[{timestamp}] Signal reçu de {client_address[0]}:")
-                    print(f"  → {data}")
-                    print()
-
-            except Exception as e:
-                print(f"Erreur lors de la réception: {e}")
-
-            finally:
-                # Fermer la connexion client
-                client_socket.close()
-
-    except KeyboardInterrupt:
-        print("\nArrêt du serveur...")
-    except Exception as e:
-        print(f"Erreur: {e}")
-    finally:
-        server_socket.close()
-
-
-def main():
-    # Configuration
-    HOST = '0.0.0.0'  # Écouter sur toutes les interfaces réseau
-    PORT = 5000  # Port d'écoute (doit correspondre à l'émetteur)
-
-    print("=== Script de réception de signaux ===")
+    print("=== Récepteur de signaux (Fichier partagé) ===")
+    print(f"Fichier surveillé: {SHARED_FILE}")
+    print("En attente de nouveaux messages...\n")
     print("Appuyez sur Ctrl+C pour arrêter\n")
 
-    # Afficher l'IP locale
+    # Attendre que le fichier existe
+    while not os.path.exists(SHARED_FILE):
+        print("⏳ En attente du fichier...")
+        time.sleep(2)
+
+    print("✓ Fichier détecté ! Surveillance active.\n")
+
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-        print(f"Votre IP locale: {local_ip}")
-    except:
-        print("Impossible de déterminer l'IP locale")
+        while True:
+            try:
+                # Lire le fichier
+                with open(SHARED_FILE, "r", encoding="utf-8") as f:
+                    # Aller à la dernière position lue
+                    f.seek(last_position)
 
-    print(f"Port d'écoute: {PORT}\n")
+                    # Lire les nouvelles lignes
+                    new_lines = f.readlines()
 
-    # Démarrer l'écoute
-    start_listening(HOST, PORT)
+                    # Mettre à jour la position
+                    last_position = f.tell()
+
+                # Afficher les nouvelles lignes
+                for line in new_lines:
+                    line = line.strip()
+                    if line and not line.startswith("==="):
+                        print(f"📨 {line}")
+
+            except Exception as e:
+                print(f"⚠️  Erreur de lecture: {e}")
+
+            time.sleep(1)  # Vérifie chaque seconde
+
+    except KeyboardInterrupt:
+        print("\n\nArrêt de la surveillance.")
 
 
 if __name__ == "__main__":
-    main()
+    watch_file()
